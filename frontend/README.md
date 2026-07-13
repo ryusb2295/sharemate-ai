@@ -1,6 +1,18 @@
-# Welcome to your Expo app 👋
+# RoomSync
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+RoomSync is a mobile-first shared living companion built with Expo Router and TypeScript.
+
+## Backend connection
+
+Copy `.env.example` to `.env.local` and replace the example address with the computer's
+Wi-Fi IPv4 address. The iPhone and computer must be on the same network.
+
+```text
+EXPO_PUBLIC_API_URL=http://YOUR_COMPUTER_IP:8000
+```
+
+Start the API from the repository root with `--host 0.0.0.0`, then start Expo from
+the `frontend` directory. Restart Expo after changing an `EXPO_PUBLIC_` variable.
 
 ## Get started
 

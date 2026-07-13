@@ -1,98 +1,55 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+import { StyleSheet, Text, View } from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { AppButton } from '@/components/app-button';
+import { ListRow } from '@/components/list-row';
+import { ScreenContainer } from '@/components/screen-container';
+import { Radius, Spacing, Typography } from '@/constants/theme';
+import { useAuth } from '@/contexts/auth-context';
+import { useRoomTheme } from '@/hooks/use-room-theme';
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const router = useRouter();
+  const colors = useRoomTheme();
+  const { currentHouse, user } = useAuth();
+  const firstName = user?.display_name ?? '룸메이트';
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  return (
+    <ScreenContainer subtitle={`${firstName}님, 오늘도 편안한 하루 보내세요.`} title="홈">
+      <View style={[styles.house, { backgroundColor: colors.primarySoft }]}>
+        <Text style={[styles.houseLabel, { color: colors.primary }]}>현재 하우스</Text>
+        <Text style={[styles.houseName, { color: colors.textPrimary }]}>{currentHouse?.name}</Text>
+        <Text style={[styles.houseMeta, { color: colors.textSecondary }]}>{currentHouse?.location} · 구성원 {currentHouse?.member_count}명</Text>
+      </View>
+
+      <View style={styles.primaryAction}>
+        <Text style={[Typography.sectionTitle, { color: colors.textPrimary }]}>공동 지출이 생겼나요?</Text>
+        <Text style={[styles.sectionDescription, { color: colors.textSecondary }]}>영수증 사진을 선택하면 품목을 자동으로 정리해요.</Text>
+        <AppButton icon="add-a-photo" label="영수증 등록" onPress={() => router.push('/settlement')} />
+      </View>
+
+      <View style={styles.section}>
+        <Text style={[Typography.sectionTitle, { color: colors.textPrimary }]}>오늘의 생활</Text>
+        <View style={[styles.list, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <ListRow icon="cleaning-services" onPress={() => router.push('/cleaning')} subtitle="현재 하우스의 실제 일정을 확인하세요" title="오늘의 청소" />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+          <ListRow icon="receipt-long" onPress={() => router.push('/settlement')} subtitle="영수증과 정산 내역 확인" title="진행 중 정산" />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+          <ListRow icon="shopping-cart" onPress={() => router.push('/shopping')} subtitle="공동 물품 목록 확인" title="공동 장바구니" />
+        </View>
+      </View>
+    </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  house: { borderRadius: Radius.card, padding: Spacing.item },
+  houseLabel: { fontSize: 12, fontWeight: '800', marginBottom: 5 },
+  houseName: { fontSize: 19, fontWeight: '800' },
+  houseMeta: { fontSize: 13, marginTop: 4 },
+  primaryAction: { gap: 9 },
+  sectionDescription: { fontSize: 14, lineHeight: 20, marginBottom: 7 },
+  section: { gap: Spacing.item },
+  list: { borderRadius: Radius.card, borderWidth: 1, paddingHorizontal: Spacing.item },
+  divider: { height: StyleSheet.hairlineWidth, marginLeft: 52 },
 });

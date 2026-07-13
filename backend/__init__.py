@@ -1,0 +1,1 @@
+"""RoomSync FastAPI backend package."""

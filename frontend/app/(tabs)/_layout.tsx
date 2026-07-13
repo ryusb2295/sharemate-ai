@@ -1,33 +1,72 @@
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Tabs } from 'expo-router';
-import React from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const colors = Colors.light;
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
+        tabBarActiveTintColor: colors.tabIconSelected,
+        tabBarInactiveTintColor: colors.tabIconDefault,
         tabBarButton: HapticTab,
+        tabBarHideOnKeyboard: true,
+        tabBarItemStyle: { paddingVertical: 3 },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        tabBarStyle: {
+          backgroundColor: colors.surface,
+          borderTopColor: colors.divider,
+          borderTopWidth: 1,
+          height: 82,
+          paddingBottom: 9,
+          paddingTop: 7,
+        },
       }}>
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          title: '홈',
+          tabBarIcon: ({ color, size }) => <MaterialIcons color={color} name="home" size={size} />,
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="settlement"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: '정산',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons color={color} name="receipt-long" size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="cleaning"
+        options={{
+          title: '청소',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons color={color} name="cleaning-services" size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="shopping"
+        options={{
+          title: '장바구니',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons color={color} name="shopping-cart" size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: '설정',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons color={color} name="settings" size={size} />
+          ),
         }}
       />
     </Tabs>
