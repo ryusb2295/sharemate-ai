@@ -8,14 +8,23 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.concurrency import run_in_threadpool
 
 from backend.app.config import get_cors_origins, get_database_path
-from backend.app.database import Database, DuplicateUserError
+from backend.app.database import (
+    AlreadyHouseMemberError,
+    Database,
+    DuplicateUserError,
+    HouseNotFoundError,
+)
 from backend.app.schemas import (
     AuthResponse,
     ChoreAssigneeResponse,
+    ChoreCompleteRequest,
+    ChoreCreateRequest,
     ChoreResponse,
-    ChoreStatusUpdateRequest,
+    ChoreUpdateRequest,
     HealthResponse,
     HouseCreateRequest,
+    HouseJoinRequest,
+    HouseMemberResponse,
     HouseResponse,
     LoginRequest,
     ReceiptAnalysisResponse,
@@ -152,6 +161,61 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(error)) from error
         return HouseResponse(**house)
 
+    @application.post("/houses/join", response_model=HouseResponse)
+    def join_house(
+        payload: HouseJoinRequest,
+        user: Annotated[dict[str, object], Depends(get_current_user)],
+        db: Annotated[Database, Depends(get_database)],
+    ) -> HouseResponse:
+        invite_code = "".join(payload.invite_code.split()).upper()
+        if not invite_code:
+            raise HTTPException(status_code=400, detail="초대코드를 입력해주세요.")
+        if not (6 <= len(invite_code) <= 8 and invite_code.isalnum() and invite_code.isascii()):
+            raise HTTPException(
+                status_code=400,
+                detail="초대코드는 6~8자리 영문 대문자와 숫자 조합입니다.",
+            )
+        try:
+            house = db.join_house_by_invite(
+                invite_code,
+                int(user["id"]),
+                str(user["display_name"]),
+            )
+        except HouseNotFoundError as error:
+            raise HTTPException(status_code=404, detail="초대코드에 해당하는 하우스가 없습니다.") from error
+        except AlreadyHouseMemberError as error:
+            raise HTTPException(status_code=409, detail="이미 참여 중인 하우스입니다.") from error
+        return HouseResponse(**house)
+
+    @application.get("/houses/{house_id}", response_model=HouseResponse)
+    def get_house(
+        house_id: int,
+        user: Annotated[dict[str, object], Depends(get_current_user)],
+        db: Annotated[Database, Depends(get_database)],
+    ) -> HouseResponse:
+        if not db.is_house_member(house_id, int(user["id"])):
+            raise HTTPException(status_code=403, detail="이 하우스에 접근할 권한이 없습니다.")
+        house = db.get_house(house_id, int(user["id"]))
+        if house is None:
+            raise HTTPException(status_code=404, detail="하우스를 찾을 수 없습니다.")
+        return HouseResponse(**house)
+
+    @application.get(
+        "/houses/{house_id}/members",
+        response_model=list[HouseMemberResponse],
+    )
+    def list_house_members(
+        house_id: int,
+        user: Annotated[dict[str, object], Depends(get_current_user)],
+        db: Annotated[Database, Depends(get_database)],
+    ) -> list[HouseMemberResponse]:
+        if not db.is_house_member(house_id, int(user["id"])):
+            raise HTTPException(status_code=403, detail="이 하우스에 접근할 권한이 없습니다.")
+        return [
+            HouseMemberResponse(**member)
+            for member in db.list_house_members(house_id)
+        ]
+
     @application.post(
         "/houses/{house_id}/receipts/analyze",
         response_model=ReceiptAnalysisResponse,
@@ -190,13 +254,22 @@ def create_app(
     def serialize_chore(row: dict[str, object]) -> ChoreResponse:
         return ChoreResponse(
             id=int(row["id"]),
+            house_id=int(row["house_id"]),
             title=str(row["title"]),
-            due_date=str(row["due_date"]),
+            description=str(row["description"]),
+            assignee_user_id=int(row["assignee_user_id"]),
+            scheduled_date=str(row["scheduled_date"]),
+            is_completed=str(row["status"]) == "완료",
             status=str(row["status"]),
+            completed_at=str(row["completed_at"])
+            if row["completed_at"] is not None
+            else None,
+            created_by=int(row["created_by"])
+            if row["created_by"] is not None
+            else None,
+            created_at=str(row["created_at"]),
             assignee=ChoreAssigneeResponse(
-                user_id=int(row["assignee_user_id"])
-                if row["assignee_user_id"] is not None
-                else None,
+                user_id=int(row["assignee_user_id"]),
                 display_name=str(row["assignee_display_name"]),
             ),
         )
@@ -211,6 +284,35 @@ def create_app(
             raise HTTPException(status_code=403, detail="이 하우스에 접근할 권한이 없습니다.")
         return [serialize_chore(row) for row in db.list_validated_chores(house_id)]
 
+    @application.post(
+        "/houses/{house_id}/chores",
+        response_model=ChoreResponse,
+        status_code=201,
+    )
+    def create_chore(
+        house_id: int,
+        payload: ChoreCreateRequest,
+        user: Annotated[dict[str, object], Depends(get_current_user)],
+        db: Annotated[Database, Depends(get_database)],
+    ) -> ChoreResponse:
+        if not db.is_house_member(house_id, int(user["id"])):
+            raise HTTPException(status_code=403, detail="이 하우스에 접근할 권한이 없습니다.")
+        if not payload.title:
+            raise HTTPException(status_code=400, detail="청소 항목명을 입력해주세요.")
+        if not db.is_house_member(house_id, payload.assignee_user_id):
+            raise HTTPException(status_code=400, detail="담당자는 현재 하우스 멤버여야 합니다.")
+        chore = db.create_chore(
+            house_id=house_id,
+            title=payload.title,
+            description=payload.description,
+            assignee_user_id=payload.assignee_user_id,
+            scheduled_date=payload.scheduled_date.isoformat(),
+            created_by=int(user["id"]),
+        )
+        if chore is None:
+            raise HTTPException(status_code=400, detail="담당자 정보를 확인해주세요.")
+        return serialize_chore(chore)
+
     @application.patch(
         "/houses/{house_id}/chores/{chore_id}",
         response_model=ChoreResponse,
@@ -218,16 +320,62 @@ def create_app(
     def update_chore(
         house_id: int,
         chore_id: int,
-        payload: ChoreStatusUpdateRequest,
+        payload: ChoreUpdateRequest,
         user: Annotated[dict[str, object], Depends(get_current_user)],
         db: Annotated[Database, Depends(get_database)],
     ) -> ChoreResponse:
         if not db.is_house_member(house_id, int(user["id"])):
             raise HTTPException(status_code=403, detail="이 하우스에 접근할 권한이 없습니다.")
-        chore = db.update_chore_status(house_id, chore_id, payload.status)
+        changes: dict[str, object] = {}
+        for field in payload.model_fields_set:
+            value = getattr(payload, field)
+            if value is not None:
+                changes[field] = value.isoformat() if field == "scheduled_date" else value
+        if not changes:
+            raise HTTPException(status_code=400, detail="수정할 내용을 입력해주세요.")
+        if "title" in changes and not str(changes["title"]):
+            raise HTTPException(status_code=400, detail="청소 항목명을 입력해주세요.")
+        if "assignee_user_id" in changes and not db.is_house_member(
+            house_id, int(changes["assignee_user_id"])
+        ):
+            raise HTTPException(status_code=400, detail="담당자는 현재 하우스 멤버여야 합니다.")
+        chore = db.update_chore(house_id, chore_id, changes)
         if chore is None:
             raise HTTPException(status_code=404, detail="청소 일정을 찾을 수 없습니다.")
         return serialize_chore(chore)
+
+    @application.patch(
+        "/houses/{house_id}/chores/{chore_id}/complete",
+        response_model=ChoreResponse,
+    )
+    def complete_chore(
+        house_id: int,
+        chore_id: int,
+        payload: ChoreCompleteRequest,
+        user: Annotated[dict[str, object], Depends(get_current_user)],
+        db: Annotated[Database, Depends(get_database)],
+    ) -> ChoreResponse:
+        if not db.is_house_member(house_id, int(user["id"])):
+            raise HTTPException(status_code=403, detail="이 하우스에 접근할 권한이 없습니다.")
+        chore = db.set_chore_completion(house_id, chore_id, payload.is_completed)
+        if chore is None:
+            raise HTTPException(status_code=404, detail="청소 일정을 찾을 수 없습니다.")
+        return serialize_chore(chore)
+
+    @application.delete(
+        "/houses/{house_id}/chores/{chore_id}",
+        status_code=204,
+    )
+    def delete_chore(
+        house_id: int,
+        chore_id: int,
+        user: Annotated[dict[str, object], Depends(get_current_user)],
+        db: Annotated[Database, Depends(get_database)],
+    ) -> None:
+        if not db.is_house_member(house_id, int(user["id"])):
+            raise HTTPException(status_code=403, detail="이 하우스에 접근할 권한이 없습니다.")
+        if not db.delete_chore(house_id, chore_id):
+            raise HTTPException(status_code=404, detail="청소 일정을 찾을 수 없습니다.")
 
     return application
 

@@ -25,6 +25,9 @@ export default function HouseSelectScreen() {
   const [creating, setCreating] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [inviteCode, setInviteCode] = useState('');
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   const loadHouses = useCallback(async () => {
     if (!token) return;
@@ -39,6 +42,7 @@ export default function HouseSelectScreen() {
   const validName = name.trim().length >= 3;
   const validLocation = location.trim().length > 0;
   const canCreate = validName && validLocation && !creating;
+  const validInviteCode = /^[A-Z0-9]{6,8}$/.test(inviteCode);
 
   const createHouse = async () => {
     setTouched(true);
@@ -51,6 +55,26 @@ export default function HouseSelectScreen() {
       await selectHouse(house);
     } catch (error) { setFormError(error instanceof Error ? error.message : '하우스를 만들지 못했습니다.'); }
     finally { setCreating(false); }
+  };
+
+  const joinHouse = async () => {
+    if (!token || !validInviteCode || joining) return;
+    setJoining(true);
+    setJoinError(null);
+    try {
+      const house = await apiRequest<House>('/houses/join', {
+        method: 'POST',
+        token,
+        body: { invite_code: inviteCode },
+      });
+      setHouses((current) => [house, ...current.filter((item) => item.id !== house.id)]);
+      setInviteCode('');
+      await selectHouse(house);
+    } catch (error) {
+      setJoinError(error instanceof Error ? error.message : '하우스에 참여하지 못했습니다.');
+    } finally {
+      setJoining(false);
+    }
   };
 
   return (
@@ -86,7 +110,35 @@ export default function HouseSelectScreen() {
         <AppTextField error={touched && !validLocation ? '지역을 입력해주세요.' : null} label="지역" onChangeText={(value) => { setLocation(value); setFormError(null); }} onSubmitEditing={createHouse} placeholder="예: Sydney" returnKeyType="done" value={location} />
         {formError ? <InlineError message={formError} /> : null}
         <AppButton disabled={!canCreate} label="하우스 만들기" loading={creating} onPress={createHouse} />
-        <AppButton disabled label="초대코드로 참여 · 준비 중" onPress={() => {}} variant="tertiary" />
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.sectionHeading}>
+          <Text style={[Typography.sectionTitle, { color: colors.textPrimary }]}>초대코드로 참여하기</Text>
+          <Text style={[styles.description, { color: colors.textSecondary }]}>하우스 구성원에게 받은 6~8자리 코드를 입력하세요.</Text>
+        </View>
+        <AppTextField
+          autoCapitalize="characters"
+          autoCorrect={false}
+          error={joinError}
+          label="초대코드"
+          maxLength={8}
+          onChangeText={(value) => {
+            setInviteCode(value.replace(/\s/g, '').toUpperCase());
+            setJoinError(null);
+          }}
+          onSubmitEditing={joinHouse}
+          placeholder="AB12CD34"
+          returnKeyType="join"
+          value={inviteCode}
+        />
+        <AppButton
+          disabled={!validInviteCode || joining}
+          label="하우스 참여"
+          loading={joining}
+          onPress={joinHouse}
+          variant="secondary"
+        />
       </View>
       <LoadingOverlay label="하우스를 불러오는 중" visible={loading} />
     </ScreenContainer>

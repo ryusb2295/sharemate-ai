@@ -20,9 +20,20 @@ default configuration.
 ## Cleaning
 
 - `GET /houses/{house_id}/chores`: list only chores assigned to a verified member of that house.
-- `PATCH /houses/{house_id}/chores/{chore_id}`: change a verified chore status between `진행 전` and `완료`.
+- `POST /houses/{house_id}/chores`: create a schedule for a verified house member.
+- `PATCH /houses/{house_id}/chores/{chore_id}`: update its title, note, assignee, or date.
+- `PATCH /houses/{house_id}/chores/{chore_id}/complete`: complete or reopen a schedule.
+- `DELETE /houses/{house_id}/chores/{chore_id}`: delete an incorrectly created schedule.
 
-Both endpoints require a bearer session and reject users who are not members of the requested house.
+All endpoints require a bearer session and reject users who are not members of the requested house.
+
+## Houses
+
+- `POST /houses`: create a house, generate an 8-character invite code, and add the creator as owner.
+- `POST /houses/join`: join an existing house with a case-insensitive invite code.
+- `GET /houses`: list the authenticated user's houses.
+- `GET /houses/{house_id}`: read house details and invite code as a member.
+- `GET /houses/{house_id}/members`: list registered members of the house.
 
 ## Receipt analysis
 

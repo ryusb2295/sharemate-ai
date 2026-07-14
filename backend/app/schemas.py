@@ -1,5 +1,5 @@
 import re
-from typing import Literal
+from datetime import date
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -66,7 +66,23 @@ class HouseResponse(BaseModel):
     location: str
     invite_code: str
     created_by: str
+    owner_id: int | None
+    created_at: str
     member_count: int
+
+
+class HouseJoinRequest(BaseModel):
+    invite_code: str = ""
+
+
+class HouseMemberResponse(BaseModel):
+    id: int
+    house_id: int
+    user_id: int
+    display_name: str
+    email: str
+    role: str
+    joined_at: str
 
 
 class HealthResponse(BaseModel):
@@ -88,17 +104,48 @@ class ReceiptAnalysisResponse(BaseModel):
 
 
 class ChoreAssigneeResponse(BaseModel):
-    user_id: int | None
+    user_id: int
     display_name: str
 
 
 class ChoreResponse(BaseModel):
     id: int
+    house_id: int
     title: str
-    due_date: str
+    description: str
+    assignee_user_id: int
+    scheduled_date: date
+    is_completed: bool
     status: str
+    completed_at: str | None
+    created_by: int | None
+    created_at: str
     assignee: ChoreAssigneeResponse
 
 
-class ChoreStatusUpdateRequest(BaseModel):
-    status: Literal["진행 전", "완료"]
+class ChoreCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
+    assignee_user_id: int = Field(gt=0)
+    scheduled_date: date
+
+    @field_validator("title", "description")
+    @classmethod
+    def normalize_chore_text(cls, value: str) -> str:
+        return value.strip()
+
+
+class ChoreUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    assignee_user_id: int | None = Field(default=None, gt=0)
+    scheduled_date: date | None = None
+
+    @field_validator("title", "description")
+    @classmethod
+    def normalize_optional_chore_text(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+
+class ChoreCompleteRequest(BaseModel):
+    is_completed: bool

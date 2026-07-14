@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { Platform } from 'react-native';
 
 import { apiRequest } from '@/services/api';
-import type { AuthResponse, House, User } from '@/types/api';
+import type { AuthResponse, House, HouseMember, User } from '@/types/api';
 
 const TOKEN_KEY = 'roomsync.accessToken';
 const HOUSE_KEY = 'roomsync.currentHouse';
@@ -35,10 +35,14 @@ type AuthContextValue = {
   token: string | null;
   user: User | null;
   currentHouse: House | null;
+  houseMembers: HouseMember[];
+  membersLoading: boolean;
+  membersError: string | null;
   saveAuth: (auth: AuthResponse) => Promise<void>;
   selectHouse: (house: House) => Promise<void>;
   clearHouse: () => Promise<void>;
   logout: () => Promise<void>;
+  refreshHouseMembers: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -48,6 +52,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [currentHouse, setCurrentHouse] = useState<House | null>(null);
+  const [houseMembers, setHouseMembers] = useState<HouseMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
 
   useEffect(() => {
     async function restoreSession() {
@@ -86,6 +93,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setToken(auth.access_token);
     setUser(auth.user);
     setCurrentHouse(null);
+    setHouseMembers([]);
     await removeStorage(HOUSE_KEY);
   }, []);
 
@@ -97,6 +105,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const clearHouse = useCallback(async () => {
     await removeStorage(HOUSE_KEY);
     setCurrentHouse(null);
+    setHouseMembers([]);
+    setMembersError(null);
   }, []);
 
   const logout = useCallback(async () => {
@@ -104,15 +114,68 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setToken(null);
     setUser(null);
     setCurrentHouse(null);
+    setHouseMembers([]);
+    setMembersError(null);
     await Promise.all([removeStorage(TOKEN_KEY), removeStorage(HOUSE_KEY)]);
     if (activeToken) {
       await apiRequest<null>('/auth/logout', { method: 'POST', token: activeToken }).catch(() => null);
     }
   }, [token]);
 
+  const refreshHouseMembers = useCallback(async () => {
+    if (!token || !currentHouse) {
+      setHouseMembers([]);
+      return;
+    }
+    setMembersLoading(true);
+    setMembersError(null);
+    try {
+      const members = await apiRequest<HouseMember[]>(
+        `/houses/${currentHouse.id}/members`,
+        { token }
+      );
+      setHouseMembers(members);
+    } catch (error) {
+      setHouseMembers([]);
+      setMembersError(error instanceof Error ? error.message : '하우스 멤버를 불러오지 못했습니다.');
+    } finally {
+      setMembersLoading(false);
+    }
+  }, [currentHouse, token]);
+
+  useEffect(() => {
+    refreshHouseMembers();
+  }, [refreshHouseMembers]);
+
   const value = useMemo(
-    () => ({ isLoading, token, user, currentHouse, saveAuth, selectHouse, clearHouse, logout }),
-    [clearHouse, currentHouse, isLoading, logout, saveAuth, selectHouse, token, user]
+    () => ({
+      isLoading,
+      token,
+      user,
+      currentHouse,
+      houseMembers,
+      membersLoading,
+      membersError,
+      saveAuth,
+      selectHouse,
+      clearHouse,
+      logout,
+      refreshHouseMembers,
+    }),
+    [
+      clearHouse,
+      currentHouse,
+      houseMembers,
+      isLoading,
+      logout,
+      membersError,
+      membersLoading,
+      refreshHouseMembers,
+      saveAuth,
+      selectHouse,
+      token,
+      user,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
