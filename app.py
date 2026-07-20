@@ -7,7 +7,8 @@ import json
 import base64
 import re
 from dotenv import load_dotenv
-from openai import OpenAI
+from google import genai
+from google.genai import types
 import streamlit.components.v1 as components
 
 from database import (
@@ -38,8 +39,8 @@ from database import (
 # -----------------------------
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 # -----------------------------
 # Streamlit 기본 설정
@@ -251,6 +252,20 @@ section[data-testid="stSidebar"] div[role="radiogroup"] > label > div:first-chil
 """, unsafe_allow_html=True)
 
 # -----------------------------
+# 예비용 Mockup 영수증 데이터 (OpenAI Vision API 호출 전 테스트용)
+# -----------------------------
+def get_mock_receipt_data():
+    return {
+        "store_name": "이마트 동대구점",
+        "items": [
+            {"name": "서울우유 1L", "price": 3.20},
+            {"name": "플레인 요거트 400g", "price": 4.50},
+            {"name": "신라면 5입", "price": 4.80}
+        ],
+        "total": 12.50
+    }
+
+# -----------------------------
 # Session State
 # -----------------------------
 if "logged_in" not in st.session_state:
@@ -435,19 +450,6 @@ if len(roommates) == 0:
     roommates = [st.session_state["current_user"]]
 
 
-# -----------------------------
-# 영수증 AI 분석 함수
-# -----------------------------
-def get_mock_receipt_data():
-    return {
-        "store_name": "Sample Receipt",
-        "items": [
-            {"name": "MATCHA GELATO SINGLE", "price": 15.00},
-            {"name": "Discount", "price": -3.00}
-        ],
-        "total": 12.00
-    }
-
 
 def extract_json_from_text(text):
     try:
@@ -459,26 +461,20 @@ def extract_json_from_text(text):
     if match:
         return json.loads(match.group(0))
 
-    raise ValueError("OpenAI 응답에서 JSON을 찾을 수 없습니다.")
+    raise ValueError("Gemini 응답에서 JSON을 찾을 수 없습니다.")
 
 
-def analyze_receipt_with_openai(uploaded_file):
+# -----------------------------
+# 영수증 AI 분석 함수
+# -----------------------------
+def analyze_receipt_with_gemini(uploaded_file):
     if client is None:
-        raise ValueError(".env 파일에 OPENAI_API_KEY가 없습니다.")
+        raise ValueError(".env 파일에 GEMINI_API_KEY가 없습니다.")
 
-    image_bytes = uploaded_file.getvalue()
-    base64_image = base64.b64encode(image_bytes).decode("utf-8")
-    mime_type = uploaded_file.type if uploaded_file.type else "image/jpeg"
+    # Streamlit 업로드 파일을 PIL Image 객체로 변환
+    image = Image.open(uploaded_file)
 
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        input=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": """
+    prompt = """
 You are an OCR assistant for receipts.
 
 Analyze the uploaded receipt image and extract:
@@ -488,8 +484,8 @@ Analyze the uploaded receipt image and extract:
 - total amount
 
 Rules:
-1. Return only valid JSON.
-2. Do not include markdown.
+1. Return ONLY valid JSON.
+2. Do not include markdown code blocks like ```json.
 3. Do not include explanations.
 4. If a discount appears, include it as an item with a negative price.
 5. Use numbers only for price and total.
@@ -508,17 +504,18 @@ Format:
   "total": 0.00
 }
 """
-                    },
-                    {
-                        "type": "input_image",
-                        "image_url": f"data:{mime_type};base64,{base64_image}"
-                    }
-                ]
-            }
-        ]
+
+    
+    response = client.models.generate_content(
+        model="gemini-3.1-flash-lite",
+        contents=[image, prompt],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json", 
+            temperature=0.0
+        )
     )
 
-    result_text = response.output_text
+    result_text = response.text
     return extract_json_from_text(result_text)
 
 
@@ -723,6 +720,17 @@ elif menu == "Receipt Split":
     st.title("🧾 Receipt Split")
     st.write("영수증 이미지를 업로드하면 AI가 품목과 금액을 추출하고 1/N 정산을 생성합니다.")
 
+    house_id = st.session_state["current_house_id"]
+
+    # 💡 [신규 연동 1] 현재 하우스의 '구매 필요' 장바구니 항목 불러오기
+    all_shopping_items = get_shopping_items(house_id)
+    needed_shopping_items = [item for item in all_shopping_items if item["status"] == "구매 필요"]
+
+    if needed_shopping_items:
+        with st.expander("🛒 현재 구매 필요한 장바구니 목록 (정산 생성 시 자동 구매 완료 처리됩니다)", expanded=True):
+            items_str = ", ".join([f"**{item['item_name']}** ({item['added_by']})" for item in needed_shopping_items])
+            st.markdown(f"💡 **살 것들:** {items_str}")
+
     st.divider()
 
     st.subheader("1. 영수증 이미지 업로드")
@@ -742,20 +750,20 @@ elif menu == "Receipt Split":
         )
 
         if st.button("AI로 영수증 분석하기"):
-            try:
-                if "receipt_data" in st.session_state:
-                    del st.session_state["receipt_data"]
+                    try:
+                        if "receipt_data" in st.session_state:
+                            del st.session_state["receipt_data"]
 
-                with st.spinner("OpenAI Vision으로 영수증을 분석하는 중입니다..."):
-                    st.session_state["receipt_data"] = analyze_receipt_with_openai(uploaded_file)
+                        with st.spinner("Gemini Vision으로 영수증을 분석하는 중입니다..."):
+                            st.session_state["receipt_data"] = analyze_receipt_with_gemini(uploaded_file)
 
-                st.success("AI 분석 완료")
+                        st.success("AI 분석 완료!")
 
-            except Exception:
-                st.warning("현재는 발표 시연용 Mock 분석 결과를 표시합니다.")
-                st.caption("실제 OpenAI API 크레딧이 충전되면 OpenAI Vision 분석 결과가 표시됩니다.")
+                    except Exception as e:
+                        st.error(f"API 호출 오류: {e}")
+                        st.warning("테스트용 Mock 분석 결과로 대체합니다.")
 
-                st.session_state["receipt_data"] = get_mock_receipt_data()
+                        st.session_state["receipt_data"] = get_mock_receipt_data()
 
     else:
         st.info("JPG, JPEG, PNG 형식의 영수증 이미지를 선택해주세요.")
@@ -852,6 +860,17 @@ elif menu == "Receipt Split":
                             st.session_state["current_house_id"]
                         )
 
+                    # 💡 [신규 연동 2] 영수증 품목 중 장바구니에 있던 물품 자동 '구매 완료' 처리
+                    receipt_item_names = [str(name).lower().strip() for name in edited_df["name"].tolist()]
+                    auto_completed_items = []
+
+                    for s_item in needed_shopping_items:
+                        s_name = s_item["item_name"].lower().strip()
+                        # 영수증 품목 이름에 장바구니 키워드가 포함되어 있으면 연동 처리
+                        if any(s_name in r_name or r_name in s_name for r_name in receipt_item_names):
+                            update_shopping_status(s_item["id"], "구매 완료")
+                            auto_completed_items.append(s_item["item_name"])
+
                     settlement_df = pd.DataFrame(settlement_rows)
                     settlement_df = settlement_df.rename(columns={
                         "content": "내용",
@@ -869,9 +888,12 @@ elif menu == "Receipt Split":
                     )
 
                     st.success("정산 생성 완료. DB와 Dashboard에 반영되었습니다.")
+
+                    if auto_completed_items:
+                        st.info(f"🛒 장바구니 연동: **{', '.join(auto_completed_items)}** 항목이 자동으로 '구매 완료' 처리되었습니다!")
+
                 else:
                     st.info("결제자만 정산 대상에 포함되어 있어 받을 금액이 없습니다.")
-
 
 # -----------------------------
 # Settlements
